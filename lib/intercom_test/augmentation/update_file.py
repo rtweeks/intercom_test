@@ -32,6 +32,7 @@ from ..yaml_tools import (
     YAML_EXT,
     content_events as _yaml_content_events,
     value_from_event_stream as _value_from_events,
+    get_load_fn as _get_yaml_loader,
 )
 
 class Indexer:
@@ -336,5 +337,5 @@ class TestCaseAugmenter:
                 ).augmentation_data_events()
     
     def _load_yaml(self, stream):
-        load_yaml = yaml.safe_load if self.safe_loading else yaml.load
+        load_yaml = _get_yaml_loader(safe=self.safe_loading)
         return load_yaml(stream)

@@ -35,8 +35,9 @@ setup(
     author_email='rtweeks21@gmail.com',
     license='Apache License 2.0',
     install_requires=[
-        'PyYAML >=3.11, <4',
+        'PyYAML >=3.11, <6',
         'pyasn1 >=0.4.2, <1',
+        'packaging >=20.8, <21',
     ],
     extras_require={
         'cli': ['docopt-subcommands>=3.0, <4', 'pick>=0.6.4, <1'],
