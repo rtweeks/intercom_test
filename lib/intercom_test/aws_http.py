@@ -390,13 +390,7 @@ def ala_rest_api(handler_mapper: HandlerMapper, context: Optional[dict] = None, 
         with case_env(case):
             handler_result = handler(case[input_key], context)
         
-        _confirm_response_code(handler_result['statusCode'], case.get('response status', 200))
-        _confirm_response_headers(
-            handler_result['headers'],
-            handler_result['multiValueHeaders'],
-            case['response headers']
-        )
-        _confirm_response_body(handler_result, case['response body'])
+        _confirm_expected_response(handler_result, case)
     
     return tester
 
@@ -517,17 +511,7 @@ def ala_http_api(handler_mapper: HandlerMapper, context: Optional[dict] = None, 
         
         handler_result = _http_conformed_result(handler_result)
         
-        _confirm_response_code(
-            handler_result['statusCode'],
-            case.get('response status', 200)
-        )
-        for expected_headers in optional_key(case, 'response headers'):
-            _confirm_response_headers(
-                handler_result.get('headers', {}),
-                handler_result.get('multiValueHeaders', {}),
-                expected_headers
-            )
-        _confirm_response_body(handler_result, case['response body'])
+        _confirm_expected_response(handler_result, case)
     
     return tester
 
@@ -633,6 +617,19 @@ def _build_aws_event_body(request_body: OneOf[str, bytes, list, dict], aws_event
         aws_event['headers']['Content-Type'] = content_type
         if 'multiValueHeaders' in aws_event:
             aws_event['multiValueHeaders']['Content-Type'] = [content_type]
+
+def _confirm_expected_response(handler_result, case):
+    _confirm_response_code(
+        handler_result['statusCode'],
+        case.get('response status', 200)
+    )
+    for expected_headers in optional_key(case, 'response headers'):
+        _confirm_response_headers(
+            handler_result.get('headers', {}),
+            handler_result.get('multiValueHeaders', {}),
+            expected_headers
+        )
+    _confirm_response_body(handler_result, case['response body'])
 
 def _confirm_response_code(actual: int, expected: int) -> None:
     assert actual == expected, (
