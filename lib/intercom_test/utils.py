@@ -14,6 +14,8 @@
 
 from contextlib import contextmanager
 import enum
+import functools
+import inspect
 import shutil
 import tempfile
 
@@ -168,3 +170,50 @@ class FilteredDictView:
     
     def __hash__(self, ):
         raise TypeError("unhashable type: '{}'".format(type(self).__qualname__))
+
+def attributed_error(cls):
+    """Expose exception instance constructor arguments (or specified names) as properties
+    
+    If the only purpose of the exception class constructor would be to generate
+    properties from the argument names, the ``ATTRIBUTES`` attribute of the
+    class can be assigned with either an iterable of :class:`str` or a single
+    :class:`str` (which will be :meth:`str.split`) to more concisely specify
+    the names to map to the arguments passed to the constructor.
+    """
+    ctor_sig = inspect.signature(cls.__init__)
+    prop_names = list(
+        name
+        for name, arg_info
+        in ctor_sig.parameters.items()
+        if arg_info.kind not in (arg_info.KEYWORD_ONLY, arg_info.VAR_KEYWORD)
+    )[1:]
+    if len(prop_names) == 1 and ctor_sig.parameters[prop_names[0]].kind is inspect.Parameter.VAR_POSITIONAL:
+        prop_names = cls.ATTRIBUTES
+        if isinstance(prop_names, str):
+            prop_names = prop_names.split()
+        else:
+            prop_names = list(prop_names)
+    
+    for i, prop_name in enumerate(prop_names):
+        value_extractor = functools.partial(_arg_extractor, i)
+        value_extractor.__doc__ = f"Index {i} argument to the constructor"
+        setattr(cls, prop_name, property(value_extractor))
+    
+    return cls
+
+def _arg_extractor(arg, exception):
+    return exception.args[arg]
+
+def optional_key(mapping, key):
+    """Syntactic sugar for working with dict keys that *might* be present
+    
+    Typical usage::
+    
+        for value in optional_key(d, 'answer'):
+            # Body executed once, with *value* assigned ``d['answer']``, if
+            # *d* contains ``'answer'``.  The body of the ``for`` is not
+            # executed at all, otherwise.
+            print(f"The answer: {value}")
+    """
+    if key in mapping:
+        yield mapping[key]
