@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 import enum
 import functools
 import inspect
@@ -217,3 +217,30 @@ def optional_key(mapping, key):
     """
     if key in mapping:
         yield mapping[key]
+
+def complex_test_context(fn):
+    """Decorator to facilitate building a test environment through context managers
+    
+    The callable decorated should accept a *test case* and a *context entry
+    callable*.  The test case is simply passed through from the wrapper.  The
+    context entry callable should be called on a context manager to enter its
+    context, and all contexts will be exited in reverse order when the
+    decorated function exits.  This compares to the ``defer`` statement in
+    the Go programming language or ``scope(exit)`` at the function level for
+    the D programming language.
+    
+    Example::
+    
+        @complex_test_context
+        def around_interface_case(case, setup):
+            setup(database_fixtures(case))
+            setup(stubs(case))
+            
+            yield
+    """
+    @functools.wraps(fn)
+    def wrapper(case):
+        with ExitStack() as env:
+            yield from fn(case, env.enter_context)
+    
+    return wrapper

@@ -26,17 +26,17 @@ file in the ``src`` directory, we could create test code like::
     from contextlib import ExitStack
     
     from unittest import TestCase
-    from intercom_test import InterfaceCaseProvider, HTTPCaseAugmenter, aws_http
+    from intercom_test import InterfaceCaseProvider, HTTPCaseAugmenter, aws_http, utils as icy_utils
     
-    def around_interface_case(case):
-        with ExitStack() as env:
-            # TODO: Build environment through `env.enter_context(...)` calls
-            # to reflect the expectations of *case*:
-            #
-            #   * Populate the database with expected data
-            #   * Stub external services with expected request/response pairs
-            
-            yield
+    @icy_utils.complex_test_context
+    def around_interface_case(case, setup):
+        setup(database(case))
+        setup(stubs(case))
+        
+        yield
+    
+    # ... define `database` and `stubs` to return context managers for the
+    # test case data they are given ...
     
     class InterfaceTests(TestCase):
         def test_interface_case(self):
