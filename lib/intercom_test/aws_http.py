@@ -375,11 +375,7 @@ def ala_rest_api(handler_mapper: HandlerMapper, context: Optional[dict] = None, 
     if context is None:
         context = {}
     
-    # TODO: case_env = _case_env_contextmanager(case_env)
-    if inspect.isgeneratorfunction(case_env):
-        case_env = contextlib.contextmanager(case_env)
-    elif case_env is None:
-        case_env = lambda _: _nullcontext()
+    case_env = _case_env_contextmanager(case_env)
     
     def tester(case):
         input_key = 'AWS Lambda input'
@@ -506,11 +502,7 @@ def ala_http_api(handler_mapper: HandlerMapper, context: Optional[dict] = None, 
     if context is None:
         context = {}
     
-    # TODO: case_env = _case_env_contextmanager(case_env)
-    if inspect.isgeneratorfunction(case_env):
-        case_env = contextlib.contextmanager(case_env)
-    elif case_env is None:
-        case_env = lambda _: _nullcontext()
+    case_env = _case_env_contextmanager(case_env)
     
     def tester(case):
         input_key = 'AWS Lambda input'
@@ -609,6 +601,15 @@ def _http_conformed_result(result: OneOf[Mapping, str, Iterable]) -> dict:
             "Content-Type": "application/json",
         },
     )
+
+def _case_env_contextmanager(case_env):
+    if case_env is None:
+        return lambda _: _nullcontext()
+    
+    if not inspect.isgeneratorfunction(case_env):
+        return case_env
+    
+    return contextlib.contextmanager(case_env)
 
 def _build_aws_event_body(request_body: OneOf[str, bytes, list, dict], aws_event: dict) -> None:
     """Modify the AWS Lambda input event based on request body
