@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 import subprocess as subp
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Union as OneOf
-from urllib.parse import urlparse, parse_qsl
+from urllib.parse import urlparse, parse_qsl, ParseResult as ParsedUrl
 from intercom_test.utils import attributed_error, optional_key
 
 AwsLambdaHandler = Callable[[dict, dict], dict]
@@ -81,6 +81,8 @@ class FunctionalHandlerMapper(HandlerMapper):
 class ServerlessHandlerMapper(HandlerMapper):
     """A :class:`HandlerMapper` drawing information from a Serverless project config
     
+    :param project_dir: root directory of the Serverless project
+    
     The typical usage of this class is with :class:`~intercom_test.framework.InterfaceCaseProvider`,
     as::
     
@@ -105,10 +107,7 @@ class ServerlessHandlerMapper(HandlerMapper):
     config_file = 'serverless.yml'
     
     def __init__(self, project_dir: OneOf[str, Path]):
-        """Construct an instance
-        
-        :param project_dir: root directory of the Serverless project
-        """
+        """Construct an instance"""
         super().__init__()
         self._project_dir = Path(project_dir)
     
@@ -118,7 +117,7 @@ class ServerlessHandlerMapper(HandlerMapper):
         return self._project_dir
     
     def map(self, method: str, path: str) -> AwsLambdaHandler:
-        """Using routing defined in the Serverless config to map a handler"""
+        """Use routing defined in the Serverless config to map a handler"""
         if not hasattr(self, '_routing'):
             self._build_routing()
         
@@ -138,6 +137,12 @@ class ServerlessHandlerMapper(HandlerMapper):
         
         The result of this method is intended to be passed to
         :meth:`intercom_test.framework.InterfaceCaseProvider.case_runners`.
+    
+        See :class:`.HttpCasePreparer` and :class:`.CasePreparer` for
+        information on keys of the test case that are consulted in constructing
+        the Lambda Function input event.  See :func:`.confirm_expected_response`
+        for information on keys of the test case consulted when evaluating the 
+        Lambda Function response.
         """
         if api_style is None:
             api_style = ala_http_api
@@ -201,11 +206,21 @@ PATH_SEGMENT = re.compile(r'/(?P<value>[^/]+)')
 class OpenAPIPathMatcher:
     """A callable class to match and extract parameters from a URL path
     
+    :param route_method:
+        HTTP method or ``'*'`` for a wildcard
+    :param route_path:
+        path part of a URL to match, which may include OpenAPI template
+        parameters
+    
     Instances accept a call with an HTTP method and a URL path-part and return
     either ``None`` for no match, or a :class:`dict` mapping path parameter
     names to their extracted values.  A returned mapping may be empty, so be
     sure to use the ``is not None`` test instead of implicit conversion to
     :class:`bool`.
+    
+    NOTE: With the current implementation, template parameters are only
+    allowed to match a full segment of the path (between slashes or from
+    a slash to the end of the path).
     """
     
     class Param(str):
@@ -216,18 +231,7 @@ class OpenAPIPathMatcher:
             return self.endswith('+')
 
     def __init__(self, route_method: str, route_path: str):
-        """Construct an instance
-        
-        :param route_method:
-            HTTP method or ``'*'`` for a wildcard
-        :param route_path:
-            path part of a URL to match, which may include OpenAPI template
-            parameters
-        
-        NOTE: With the current implementation, template parameters are only
-        allowed to match a full segment of the path (between slashes or from
-        a slash to the end of the path).
-        """
+        """Construct an instance"""
         super().__init__()
         self.method = route_method
 
@@ -331,46 +335,9 @@ def ala_rest_api(handler_mapper: HandlerMapper, context: Optional[dict] = None, 
     constructor is invoked with the test case data :class:`dict` around
     invocation of the handler callable.
     
-    The following keys are treated specially in the test case data accepted by
-    the returned callable:
-    
-    ``'method'``
-        (:class:`str`, **required**) The HTTP method
-    
-    ``'url'``
-        (:class:`str`, **required**) The path part of the URL
-    
-    ``'stageVariables'``
-        (:class:`dict`) Mapping of stage variables to their values
-    
-    ``'identity'``
-        (:class:`dict`) Client identity information used to populate
-        ``$.requestContext.identity``
-    
-    ``'request headers'``
-        (:class:`dict` or list of 2-item lists) HTTP headers for request
-    
-    ``'request body'``
-        A :class:`str`, :class:`bytes`, or JSONic data type giving the body
-        of the request to test; JSONic data is rendered to JSON for submission
-        and implies a ``Content-Type`` header of ``'application/json'``
-    
-    ``'response status'``
-        (:class:`int`) The HTTP response status code number expected, defaulting
-        to 200
-    
-    ``'response headers'``
-        (:class:`dict` or list of 2-item lists) HTTP headers required in the
-        response; if a header is listed here and is returned as a multi-value
-        header (in ``'multiValueHeaders'``), the *set* of values in the
-        response is expected to match the *set* of values listed here in the
-        test case
-    
-    ``'response body'``
-        (**required**) A :class:`str`, :class:`bytes`, or JSONic data type
-        giving the expected body of the response; JSONic data is compared
-        against the response by parsing the body of the response as JSON, then
-        comparing to the data given here in the test case
+    See :class:`.RestCasePreparer` and :class:`.CasePreparer` for
+    information on keys of the test case that are consulted in constructing
+    the Lambda Function input event.
     """
     if context is None:
         context = {}
@@ -379,7 +346,7 @@ def ala_rest_api(handler_mapper: HandlerMapper, context: Optional[dict] = None, 
     
     def tester(case):
         input_key = 'AWS Lambda input'
-        _rest_prep_case(case, input_key)
+        case[input_key] = RestCasePreparer(case).lambda_input()
         
         handler = handler_mapper.map(
             case[input_key]['httpMethod'],
@@ -390,50 +357,9 @@ def ala_rest_api(handler_mapper: HandlerMapper, context: Optional[dict] = None, 
         with case_env(case):
             handler_result = handler(case[input_key], context)
         
-        _confirm_expected_response(handler_result, case)
+        confirm_expected_response(handler_result, case)
     
     return tester
-
-def _rest_prep_case(case: dict, aws_lambda_input_key: Any) -> None:
-    """Build the AWS Lambda input data and inject into the test case data
-    
-    :param case: test case data
-    :param aws_lambda_input_key: key in *case* to set with AWS Lambda input data
-    
-    The event :class:`dict` built is for a REST API Lambda integration.
-    """
-    url = urlparse(case['url'])
-    _, stage, path = url.path.split('/', 2)
-    aws_event = dict(
-        requestContext=dict(
-            stage=stage,
-        ),
-        stageVariables={},
-        path='/' + path,
-        httpMethod=case.get('method', 'get').lower(),
-        queryStringParameters={},
-        multiValueQueryStringParameters={},
-        headers={},
-        multiValueHeaders={},
-        isBase64Encoded=False,
-    )
-    for vars in optional_key(case, 'stageVariables'):
-        aws_event['stageVariables'] = vars
-    for identity in optional_key(case, 'identity'):
-        aws_event['requestContext']['identity'] = identity
-    for headers in optional_key(case, 'request headers'):
-        if hasattr(headers, 'items') and callable(headers.items):
-            headers = headers.items()
-        for name, value in headers:
-            aws_event['headers'][name] = value
-            aws_event['multiValueHeaders'].setdefault(name, []).append(value)
-    for name, value in parse_qsl(url.query):
-        aws_event['queryStringParameters'][name] = value
-        aws_event['multiValueQueryStringParameters'].setdefault(name, []).append(value)
-    for body in optional_key(case, 'request body'):
-        _build_aws_event_body(body, aws_event)
-    
-    case[aws_lambda_input_key] = aws_event
 
 def ala_http_api(handler_mapper: HandlerMapper, context: Optional[dict] = None, case_env=None) -> Callable[[dict], None]:
     """Build a case tester from a :class:`HandlerMapper` for an HTTP API
@@ -449,49 +375,11 @@ def ala_http_api(handler_mapper: HandlerMapper, context: Optional[dict] = None, 
     constructor is invoked with the test case data :class:`dict` around
     invocation of the handler callable.
     
-    The following keys are treated specially in the test case data accepted by
-    the returned callable (where those required are labeled as such):
-    
-    ``'method'``
-        (:class:`str`, **required**) The HTTP method
-    
-    ``'url'``
-        (:class:`str`, **required**) The path part of the URL
-    
-    ``'stageVariables'``
-        (:class:`dict`) Mapping of stage variables to their values
-    
-    ``'client certificate'``
-        (:class:`dict`) The field of the client certificate provided for the
-        test, to populate ``$.requestContext.authentication.clientCert``
-    
-    ``'request authorization'``
-        (:class:`dict`) Used to populate ``$.requestContext.authorizer``
-    
-    ``'request headers'``
-        (:class:`dict` or list of 2-item lists) HTTP headers for request
-    
-    ``'request body'``
-        A :class:`str`, :class:`bytes`, or JSONic data type giving the body
-        of the request to test; JSONic data is rendered to JSON for submission
-        and implies a ``Content-Type`` header of ``'application/json'``
-    
-    ``'response status'``
-        (:class:`int`) The HTTP response status code number expected, defaulting
-        to 200
-    
-    ``'response headers'``
-        (:class:`dict` or list of 2-item lists) HTTP headers required in the
-        response; if a header is listed here and is returned as a multi-value
-        header (in ``'multiValueHeaders'``), the *set* of values in the
-        response is expected to match the *set* of values listed here in the
-        test case
-    
-    ``'response body'``
-        (**required**) A :class:`str`, :class:`bytes`, or JSONic data type
-        giving the expected body of the response; JSONic data is compared
-        against the response by parsing the body of the response as JSON, then
-        comparing to the data given here in the test case
+    See :class:`.HttpCasePreparer` and :class:`.CasePreparer` for
+    information on keys of the test case that are consulted in constructing
+    the Lambda Function input event.  See :func:`.confirm_expected_response`
+    for information on keys of the test case consulted when evaluating the 
+    Lambda Function response.
     """
     if context is None:
         context = {}
@@ -500,7 +388,7 @@ def ala_http_api(handler_mapper: HandlerMapper, context: Optional[dict] = None, 
     
     def tester(case):
         input_key = 'AWS Lambda input'
-        _http_prep_case(case, input_key)
+        case[input_key] = HttpCasePreparer(case).lambda_input()
         
         handler = handler_mapper.map(
             case[input_key]['requestContext']['http']['method'],
@@ -511,62 +399,9 @@ def ala_http_api(handler_mapper: HandlerMapper, context: Optional[dict] = None, 
         
         handler_result = _http_conformed_result(handler_result)
         
-        _confirm_expected_response(handler_result, case)
+        confirm_expected_response(handler_result, case)
     
     return tester
-
-def _http_prep_case(case: dict, aws_lambda_input_key: Any) -> None:
-    """Build the AWS Lambda input data and inject into the test case data
-    
-    :param case: test case data
-    :param aws_lambda_input_key: key in *case* to set with AWS Lambda input data
-    
-    The event :class:`dict` built is for a HTTP API Lambda proxy integration.
-    """
-    url = urlparse(case['url'])
-    aws_event = dict(
-        requestContext=dict(
-            http=dict(
-                method=case.get('method', 'get').lower(),
-                path=url.path,
-                protocol='HTTP/1.1',
-            ),
-            authentication={},
-            authorizer={},
-        ),
-        rawPath=url.path,
-        rawQueryString=url.query,
-        headers={},
-        isBase64Encoded=False,
-        stageVariables={},
-        queryStringParameters={},
-    )
-    for vars in optional_key(case, 'stageVariables'):
-        aws_event['stageVariables'] = vars
-    for certificate in optional_key(case, 'client certificate'):
-        aws_event['requestContext']['authentication']['clientCert'] = certificate
-    for authorization in optional_key(case, 'request authorization'):
-        aws_event['requestContext']['authorizer'] = authorization
-    for headers in optional_key(case, 'request headers'):
-        if hasattr(headers, 'items') and callable(headers.items):
-            headers = headers.items()
-        event_headers = aws_event['headers']
-        for name, value in headers:
-            # TODO: Special case for cookies
-            if name in event_headers:
-                event_headers[name] += ',' + value
-            else:
-                event_headers[name] = value
-    event_qsparams = aws_event['queryStringParameters']
-    for name, value in parse_qsl(url.query):
-        if name in event_qsparams:
-            event_qsparams[name] += ',' + value
-        else:
-            event_qsparams[name] = value
-    for body in optional_key(case, 'request body'):
-        _build_aws_event_body(body, aws_event)
-    
-    case[aws_lambda_input_key] = aws_event
 
 def _http_conformed_result(result: OneOf[Mapping, str, Iterable]) -> dict:
     """Apply HTTP API v2.0 Lambda function output rules"""
@@ -595,6 +430,204 @@ def _case_env_contextmanager(case_env):
     
     return contextlib.contextmanager(case_env)
 
+class CasePreparer:
+    """Common base class for building an AWS API Gateway event for a Lambda Function
+    
+    :param case: test case data
+    
+    The following keys in *case* are consulted when generating the Lambda
+    Function input value (:meth:`.lambda_input`):
+    
+    ``'method'``
+        (:class:`str`, **required**) The HTTP method
+    
+    ``'url'``
+        (:class:`str`, **required**) The path part of the URL
+    
+    ``'stageVariables'``
+        (:class:`dict`) Mapping of stage variables to their values
+    
+    ``'request headers'``
+        (:class:`dict` or list of 2-item lists) HTTP headers for request
+    
+    ``'request body'``
+        A :class:`str`, :class:`bytes`, or JSONic data type giving the body
+        of the request to test; JSONic data is rendered to JSON for submission
+        and implies a ``Content-Type`` header of ``'application/json'``
+    
+    Subclasses may also consult additional keys in *case*; see the
+    documentation of the subclass.
+    """
+    def __init__(self, case: Mapping):
+        """Construct an instance"""
+        super().__init__()
+        self._case = case
+    
+    @property
+    def method(self) -> str:
+        """HTTP method of the test case"""
+        return self._case.get('method', 'get').lower()
+    
+    @property
+    def url(self) -> ParsedUrl:
+        """URL of the test case"""
+        if not hasattr(self, '_url'):
+            self._url = urlparse(self._case['url'])
+        return self._url
+    
+    def lambda_input(self, ) -> dict:
+        """Get the Lambda Function input for the test case"""
+        if not hasattr(self, '_event'):
+            self._build_event()
+        
+        return self._event
+    
+    def _build_event(self, ):
+        self._event = event = self._get_base_fields()
+        for vars in self._if_given('stageVariables'):
+            event['stageVariables'] = vars
+        self._incorporate_authorization()
+        self._incorporate_qsparams()
+        self._incorporate_headers()
+        for body in self._if_given('request body'):
+            _build_aws_event_body(body, event)
+    
+    def _incorporate_authorization(self, ):
+        # Subclass can skip implementing this if desired
+        pass
+    
+    def _if_given(self, key):
+        # Use this like:
+        #
+        #     for vars in self._if_given('stageVariables'):
+        #         <body to execute if 'stageVariables' is present in test case data>
+        
+        return optional_key(self._case, key)
+
+class RestCasePreparer(CasePreparer):
+    """Prepare Lambda Function input event for REST API
+    
+    :param case: test case data
+    
+    In addition to the keys listed in base class :class:`CasePreparer`, this
+    class also consults the following optional keys of *case* when building the
+    Lambda Function input:
+    
+    ``'identity'``
+        (:class:`dict`) Client identity information used to populate
+        ``$.requestContext.identity``
+    """
+    
+    def _get_base_fields(self, ):
+        case = self._case
+        _, stage, path = self.url.path.split('/', 2)
+        return dict(
+            requestContext=dict(
+                stage=stage,
+            ),
+            stageVariables={},
+            path='/' + path,
+            httpMethod=self.method,
+            queryStringParameters={},
+            multiValueQueryStringParameters={},
+            headers={},
+            multiValueHeaders={},
+            isBase64Encoded=False,
+        )
+    
+    def _incorporate_authorization(self, ):
+        for identity in self._if_given('identity'):
+            self._event['requestContext']['identity'] = identity
+    
+    def _incorporate_qsparams(self, ):
+        self._capture_named(
+            'queryStringParameters',
+            'multiValueQueryStringParameters',
+            parse_qsl(self.url.query)
+        )
+    
+    def _incorporate_headers(self, ):
+        for headers in self._if_given('request headers'):
+            if hasattr(headers, 'items') and callable(headers.items):
+                headers = headers.items()
+            
+            self._capture_named(
+                'headers',
+                'multiValueHeaders',
+                headers
+            )
+    
+    def _capture_named(self, last_values_key, multi_values_key, name_value_pairs):
+        last_values = self._event[last_values_key]
+        multi_values = self._event[multi_values_key]
+        
+        for name, value in name_value_pairs:
+            last_values[name] = value
+            multi_values.setdefault(name, []).append(value)
+
+class HttpCasePreparer(CasePreparer):
+    """Prepare Lambda Function input event for HTTP API
+    
+    :param case: test case data
+    
+    In addition to the keys listed in base class :class:`CasePreparer`, this
+    class also consults the following optional keys of *case* when building the
+    Lambda Function input:
+    
+    ``'client certificate'``
+        (:class:`dict`) The field of the client certificate provided for the
+        test, to populate ``$.requestContext.authentication.clientCert``
+    
+    ``'request authorization'``
+        (:class:`dict`) Used to populate ``$.requestContext.authorizer``
+    """
+    
+    def _get_base_fields(self, ):
+        case = self._case
+        return dict(
+            requestContext=dict(
+                http=dict(
+                    method=self.method,
+                    path=self.url.path,
+                    protocol='HTTP/1.1',
+                ),
+                authentication={},
+                authorizer={},
+            ),
+            stageVariables={},
+            rawPath=self.url.path,
+            rawQueryString=self.url.query,
+            queryStringParameters={},
+            headers={},
+            isBase64Encoded=False,
+        )
+    
+    def _incorporate_authorization(self, ):
+        for certificate in self._if_given('client certificate'):
+            self._event['requestContext']['authentication']['clientCert'] = certificate
+        for authorization in self._if_given('request authorization'):
+            self._event['requestContext']['authorizer'] = authorization
+    
+    def _incorporate_qsparams(self, ):
+        event_qsparams = self._event['queryStringParameters']
+        for name, value in parse_qsl(self.url.query):
+            self._accum_multivalue(event_qsparams, name, value)
+    
+    def _incorporate_headers(self, ):
+        for headers in self._if_given('request headers'):
+            if hasattr(headers, 'items') and callable(headers.items):
+                headers = headers.items()
+            event_headers = self._event['headers']
+            for name, value in headers:
+                # TODO: Special case for cookies
+                self._accum_multivalue(event_headers, name, value)
+    
+    def _accum_multivalue(self, d, key, value):
+        if key in d:
+            d[key] += ',' + str(value)
+        else:
+            d[key] = value
+
 def _build_aws_event_body(request_body: OneOf[str, bytes, list, dict], aws_event: dict) -> None:
     """Modify the AWS Lambda input event based on request body
     
@@ -618,7 +651,35 @@ def _build_aws_event_body(request_body: OneOf[str, bytes, list, dict], aws_event
         if 'multiValueHeaders' in aws_event:
             aws_event['multiValueHeaders']['Content-Type'] = [content_type]
 
-def _confirm_expected_response(handler_result, case):
+def confirm_expected_response(handler_result: dict, case: dict) -> None:
+    """Confirm that the (normalized) output of the handler meets case expectations
+    
+    :param handler_result: result from the Lambda Function handler
+    :param case: the test case data
+    
+    Normalization of the handler function output *does not occur* in this
+    function; normalize *handler_result* before passing it in.
+    
+    The following keys in *case* are consulted when evaluating the Lambda
+    Function response:
+    
+    ``'response status'``
+        (:class:`int`) The HTTP response status code number expected, defaulting
+        to 200
+    
+    ``'response headers'``
+        (:class:`dict` or list of 2-item lists) HTTP headers required in the
+        response; if a header is listed here and is returned as a multi-value
+        header (in ``'multiValueHeaders'``), the *set* of values in the
+        response is expected to match the *set* of values listed here in the
+        test case
+    
+    ``'response body'``
+        (**required**) A :class:`str`, :class:`bytes`, or JSONic data type
+        giving the expected body of the response; JSONic data is compared
+        against the response by parsing the body of the response as JSON, then
+        comparing to the data given here in the test case
+    """
     _confirm_response_code(
         handler_result['statusCode'],
         case.get('response status', 200)

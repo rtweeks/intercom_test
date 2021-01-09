@@ -9,7 +9,7 @@ a Serverless application is integrated through Lambda Functions, which have a
 simple call interface in several languages.  Where the language chosen is
 Python, using the :doc:`intercom_test package </index>` allows development of
 the interface test cases in familiar HTTP terms but, through
-:py:class:`intercom_test.aws_http.ServerlessHandlerMapper`, allows the Lambda
+:py:class:`~intercom_test.aws_http.ServerlessHandlerMapper`, allows the Lambda
 handler functions to be tested.
 
 Extended Example
@@ -65,10 +65,15 @@ file in the ``src`` directory, we could create test code like::
         unittest.main()
 
 The callable returned from :py:meth:`intercom_test.aws_http.ServerlessHandlerMapper.case_tester`
-accepts a :py:class:`dict` of test case data, some keys in which have special
-meaning (see :py:func:`intercom_test.aws_http.ala_http_api`).  It does not care
-where this :py:class:`dict` comes from, but a
+accepts a :py:class:`dict` of test case data.  It does not care where this
+:py:class:`dict` comes from, but an
 :py:class:`intercom_test.framework.InterfaceCaseProvider` is specifically
-designed to provide that.
+designed to provide such a value.
+
+Certain keys of the test case :class:`dict` are consulted (documented in
+:py:class:`intercom_test.aws_http.HttpCasePreparer`) when building the event
+passed to the handler function, and certain other keys (documented in
+:py:func:`intercom_test.aws_http.confirm_expected_response`) are used for
+evaluating correctness of the handler function's result.
 
 .. _Serverless: https://www.serverless.com
