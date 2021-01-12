@@ -8,28 +8,72 @@ from difflib import SequenceMatcher
 from enum import IntEnum
 from heapq import heappush, heappop
 import itertools
+import json
 import Levenshtein
 import math
 from operator import itemgetter
 import time
 from typing import Iterable, Tuple, Sequence as SequenceType
 from urllib.parse import urlparse, parse_qsl
+from intercom_test.cases import hash_from_fields as case_hash
+from intercom_test.utils import FilteredDictView
 
 class Database:
-    def __init__(self, cases: Iterable[dict]):
+    def __init__(self, cases: Iterable[dict], *, add_request_keys=()):
         super().__init__()
         
         if not isinstance(cases, Sequence):
             cases = list(cases)
         
+        self._additional_request_keys = frozenset(add_request_keys)
+        
+        self._responses = dict((self._case_key(case), case) for case in cases)
         self._reqlines = _group_dict(cases, _reqline)
         self._urls = _group_dict(cases, _request_url)
         self._paths = _group_dict(cases, _request_url_path)
-        
+    
+    def get_case(self, request: dict):
+        return self._responses.get(self._case_key(request))
+    
     def best_matches(self, request: dict, *, timeout: float = 0.3) -> dict:
         """Given HTTP request parameters, find the best known match"""
         
         return _Reporter(self, request, deadline=time.time() + timeout).report()
+    
+    def json_exchange(self, request_json, reply_stream):
+        request = json.loads(request_json)
+        case = self.get_case(request)
+        if case is not None:
+            # Shallow copy, but only to ensure setting 'response status'
+            # doesn't change the test case
+            response = dict(case)
+            # Ensure there is _always_ a 'response status' when a case is returned
+            response.setdefault('response status', 200)
+        else:
+            response = self.best_matches(request).as_jsonic_data()
+            # Ensure there is _never_ a 'response status' when diffs are returned
+            response.pop('response status', None)
+        
+        json.dump(response, reply_stream)
+    
+    def _case_key(self, request: dict):
+        def request_key(k):
+            return (
+                k in ('method', 'url', 'request body')
+                or
+                k in self._additional_request_keys
+            )
+        def value_lens(v):
+            import sys; from IPython.core.debugger import Pdb; sys.stdout.isatty() and Pdb().set_trace()
+            if isinstance(v, bytes):
+                return ('binary', str(v))
+            return v
+        hash_input = FilteredDictView(
+            request,
+            key_filter=request_key,
+            value_transform=value_lens,
+        )
+        return case_hash(hash_input)
 
 class _Reporter:
     def __init__(self, database, request, *, deadline=math.inf):
@@ -40,12 +84,16 @@ class _Reporter:
     
     @property
     def request_body(self):
-        return self.request['request body']
+        return self.request.get('request body')
     
     def report(self, ):
         db = self.database
         request = self.request
         if _reqline(request) in db._reqlines:
+            # TODO: Could be a missing additional field or unknown value in an additional field
+            addnl_fields_mismatch = self._get_additional_fields_mismatch()
+            if addnl_fields_mismatch:
+                return addnl_fields_mismatch
             return self._report_closest_request_bodies()
         
         if _request_url(request) in db._urls:
@@ -67,6 +115,42 @@ class _Reporter:
             for path in closest_paths
         ))
     
+    def _get_additional_fields_mismatch(self, ):
+        cases = self.database._reqlines[_reqline(self.request)]
+        
+        addnl_request_keys = set(self.database._additional_request_keys).difference({'method', 'url', 'request body'})
+        def is_addnl_field(k):
+            return isinstance(k, str) and k in addnl_request_keys
+        
+        possible_value_sets = []
+        for case in cases:
+            fvals = sorted(
+                FilteredDictView(case, key_filter=is_addnl_field).items()
+            )
+            if fvals not in possible_value_sets:
+                possible_value_sets.append(fvals)
+        
+        request_addnl_fields = sorted(
+            FilteredDictView(self.request, key_filter=is_addnl_field).items()
+        )
+        if request_addnl_fields in possible_value_sets:
+            return None
+        def dist_from_request_addnl_fields(case_addnl_fields):
+            sm = SequenceMatcher(None, request_addnl_fields, case_addnl_fields)
+            opcodes = sm.get_opcodes()
+            return sum(
+                max(i2 - i1, j2 - j1)
+                for op_type, i1, i2, j1, j2 in opcodes
+                if op_type != 'equal'
+            )
+        
+        closest_addnl_fields = sorted(
+            possible_value_sets,
+            key=dist_from_request_addnl_fields
+        )[:5]
+        
+        return AvailableAdditionalFieldsReport(closest_addnl_fields)
+    
     def _report_closest_request_bodies(self, ):
         # Report items in the database that have the most similar request bodies
         request_body = self.request_body
@@ -75,7 +159,7 @@ class _Reporter:
         available_cases = list(
             case
             for case in self.database._reqlines[_reqline(self.request)]
-            if type(case['request body']) == reqbody_type
+            if type(case.get('request body')) == reqbody_type
         )
         
         if reqbody_is_jsonic:
@@ -85,7 +169,7 @@ class _Reporter:
                 if time.time() >= self.deadline:
                     break
                 
-                diff = jcomp.diff(case['request body'])
+                diff = jcomp.diff(case.get('request body'))
                 
                 heappush(near_reqbodies_heap, (
                     diff.edit_distance(),
@@ -153,6 +237,20 @@ class Report(ABC):
     def as_jsonic_data(self, ):
         """Convert this report to JSON data"""
 
+class AvailableAdditionalFieldsReport(Report):
+    def __init__(self, available_value_sets):
+        super().__init__()
+        self.available_value_sets = available_value_sets
+    
+    def as_jsonic_data(self, ):
+        return {
+            # 'available additional test case field value sets': self.available_value_sets,
+            'available additional test case field value sets': list(
+                dict(value_set)
+                for value_set in self.available_value_sets
+            )
+        }
+    
 class AvailablePathsReport(Report):
     def __init__(self, test_case_groups):
         super().__init__()

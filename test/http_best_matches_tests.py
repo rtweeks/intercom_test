@@ -1,5 +1,6 @@
 from intercom_test import http_best_matches as subject
 from base64 import b64encode
+from io import StringIO
 import json
 from should_dsl import should, should_not
 
@@ -70,6 +71,7 @@ class JsonDescStrings:
     QSTRING_DELTAS = 'minimal query string deltas'
     TARGET_QSPARAMS = 'params with differing value sequences'
     GOOD_PATHS = 'closest URL paths'
+    ADDNL_FIELDS_SETS = 'available additional test case field value sets'
 
 ################################# TESTS #################################
 
@@ -546,3 +548,80 @@ def test_wrong_path():
             ('/food/goat', []), # Note this is moved later in the list because of higher edit distance
         ]
     })
+
+def test_json_exchange_get_case():
+    case = {
+        'method': 'get',
+        'url': '/pet_name',
+        'response body': 'Fluffy',
+    }
+    db = subject.Database([case])
+    
+    output = StringIO()
+    db.json_exchange(json.dumps(make_case('get', '/pet_name')), output)
+    output.tell() |should_not| equal_to(0)
+    output.seek(0)
+    result = json.load(output)
+    
+    result |should| contain('response status')
+    list(result.items()) |should| include_all_of(case.items())
+
+def test_json_exchange_miss_case():
+    db = subject.Database([
+        {
+            'method': 'post',
+            'url': '/pet_name',
+            'response body': 'Fluffy',
+        }
+    ])
+    
+    output = StringIO()
+    db.json_exchange(json.dumps(make_case('get', '/pet_name')), output)
+    output.tell() |should_not| equal_to(0)
+    output.seek(0)
+    result = json.load(output)
+    
+    result |should_not| contain('response status')
+
+def test_json_exchange_differentiate_on_addnl_field():
+    cases = [
+        {
+            'story': "Alice's pet",
+            'description': "Getting Alice's pet's name",
+            'method': 'get',
+            'url': '/pet_name',
+            'response body': 'Fluffy',
+        },
+        {
+            'story': "Bob's pet",
+            'description': "Getting Bob's pet's name",
+            'method': 'get',
+            'url': '/pet_name',
+            'response body': 'Max',
+        },
+    ]
+    db = subject.Database(cases, add_request_keys=('story',))
+    
+    base_request = make_case('get', '/pet_name')
+    def exchange_for_story(story):
+        output = StringIO()
+        db.json_exchange(
+            json.dumps(dict(base_request, story=story)),
+            output
+        )
+        output.tell() |should_not| equal_to(0)
+        output.seek(0)
+        return json.load(output)
+    
+    result = exchange_for_story("Alice's pet")
+    result |should| contain('response status')
+    result['response body'] |should| equal_to('Fluffy')
+    
+    result = exchange_for_story("Bob's pet")
+    result |should| contain('response status')
+    result['response body'] |should| equal_to('Max')
+    
+    result = exchange_for_story("Charlie's pet")
+    result |should_not| contain('response status')
+    result |should| contain(JsonDescStrings.ADDNL_FIELDS_SETS)
+    result[JsonDescStrings.ADDNL_FIELDS_SETS] |should| include_all_of({'story': case['story']} for case in cases)
