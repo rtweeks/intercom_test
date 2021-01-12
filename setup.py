@@ -37,6 +37,7 @@ setup(
     install_requires=[
         'PyYAML >=3.11, <4',
         'pyasn1 >=0.4.2, <1',
+        'python-Levenshtein >=0.12, <1',
     ],
     extras_require={
         'cli': ['docopt-subcommands>=3.0, <4', 'pick>=0.6.4, <1'],
