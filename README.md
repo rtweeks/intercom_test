@@ -69,11 +69,6 @@ This essentially means distributing the test cases through multiple files.  *int
 When this package is installed with the `[cli]` extra, it makes a command line tool called `icy-test` available to access the core functionality of `intercom_test`, facilitating use of this functionality in languages other than Python.  Help on use of the tool can be obtained by running `icy-test --help`.
 
 
-## CVE-2017-18342
-
-This package allows the latest major released version of *PyYAML* at the time of publication, 3.13.  The PyYAML team has long debated a breaking change to make `yaml.load` a "safe" operation vs. it's current arbitrary code execution vulnerability.  *intercom_test* supports `safe_loading` in several places (as a keyword argument or an object property) -- defaulting to `True` -- to allow reversion to vulnerable behavior for any client code choosing that burden.  By default, *intercom_test* now only uses "safe" YAML loading.  Unfortunately, until a new major version of *PyYAML* is released addressing the default-unsafe API indicated by this CVE, *intercom_test* cannot publish a version compatible with the new API.
-
-
 ## Contributing
 
 1. Fork it ( https://github.com/PayTrace/intercom_test )
