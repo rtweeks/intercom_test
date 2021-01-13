@@ -1,0 +1,2 @@
+[nosetests]
+testmatch = ((\b|_)tests?|(\b|[a-zA-Z])Tests?)\Z

@@ -5,6 +5,12 @@ Contributing to intercom_test
 
 The following is a set of guidelines for contributing to this project.  These are mostly guidelines, not rules. Use your best judgment, and feel free to propose changes to this document in a pull request.
 
+## Unit Tests
+
+`Development` is a requirements.txt-style file meant to be `pip install`-ed from the root directory of the project.  It will install the `intercom_test` package from the project directory in development mode as well as the development tools needed for running the tests in the repository and other project-related tasks (like coverage reporting).
+
+`intercom_test` is set up to be tested with [nose][nose-package] via `bin/sniff.sh`.  This small bash script may have useful comments about arguments that can be passed.
+
 ## Code Review
 
 All pull requests will be reviewed by one or more of the Senior Engineers at PayTrace. As of 2018-October-21, those users are:
@@ -22,3 +28,7 @@ Obviously for such larger changes, there may be a delay in reviewing/merging if 
 ## Help us help you!
 
 We highly recommend [allowing edits from maintainers](https://help.github.com/articles/allowing-changes-to-a-pull-request-branch-created-from-a-fork/) (ie, us) to your branch. Since intercom_test is actively developed, there's a good chance that other pull requests will have been merged in between when you submit a pull request and when we approve it. Allowing us to edit your branch means that we can rebase and fix any merge conflicts for you.
+
+
+
+[nose-package]: https://pypi.org/project/nose/

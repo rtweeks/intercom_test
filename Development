@@ -1,0 +1,9 @@
+# A requirements.txt-style file for development dependencies
+
+# Bring this library in via development-install
+-e .
+
+# Development/testing dependencies
+nose ~=1.3
+coverage ~=5.3
+should_dsl ~=2.1
