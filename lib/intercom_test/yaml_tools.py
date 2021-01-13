@@ -13,9 +13,11 @@
 # limitations under the License.
 
 from io import StringIO
+import packaging.version
 import yaml
 
 YAML_EXT = '.yml'
+PYYAML_REQUIRES_LOADER = packaging.version.parse('5.1') <= packaging.version.parse(yaml.__version__)
 
 def content_events(value):
     """Return an iterable of events presenting *value* within a YAML document"""
@@ -88,3 +90,10 @@ def value_from_event_stream(content_events, *, safe_loading=True):
         yaml.constructor.Constructor
     )()
     return node_constructor.construct_object(node, True)
+
+def get_load_fn(*, safe=True):
+    if safe:
+        return yaml.safe_load
+    if PYYAML_REQUIRES_LOADER:
+        return yaml.unsafe_load
+    return yaml.load

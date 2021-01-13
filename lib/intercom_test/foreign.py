@@ -116,6 +116,7 @@ class Config(object):
     CASE_AUGMENTATION_KEYS = frozenset(('augmentation data', 'request keys'))
     
     case_augmenter = None
+    request_keys = ()
     
     def __init__(self, filepath):
         super(Config, self).__init__()
@@ -127,18 +128,24 @@ class Config(object):
         self.interface_dir = os.path.join(ref_dir, cfg_data['interfaces'])
         self.service_name = cfg_data['service name']
         
-        which_aug_keys = self.CASE_AUGMENTATION_KEYS & set(cfg_data.keys())
-        if self.CASE_AUGMENTATION_KEYS == which_aug_keys:
+        if 'request keys' in cfg_data:
+            self.request_keys = frozenset(cfg_data['request keys'])
+            assert all(isinstance(k, str) for k in self.request_keys), (
+                "request keys must be a sequence of strings"
+            )
+        
+        if self.CASE_AUGMENTATION_KEYS < set(cfg_data.keys()):
             class CLICaseAugmenter(framework.CaseAugmenter):
                 pass
-            CLICaseAugmenter.CASE_PRIMARY_KEYS = frozenset(cfg_data['request keys'])
+            CLICaseAugmenter.CASE_PRIMARY_KEYS = self.request_keys
             self.case_augmenter = CLICaseAugmenter(
                 os.path.join(ref_dir, cfg_data['augmentation data'])
             )
-        elif which_aug_keys:
-            print("Case augmentation partially specified (only {} given)!".format(
-                ', '.join(repr(k) for k in which_aug_keys)
-            ), file=sys.stderr)
+        elif 'augmentation data' in cfg_data:
+            print(
+                "Case augmentation partially specified (only 'augmentation data' given)!",
+                file=sys.stderr,
+            )
     
     @classmethod
     def build_with_cui(cls, filepath):
@@ -265,6 +272,51 @@ def merge_cases(options):
         config.service_name,
     )
     case_provider.merge_test_extensions()
+
+@subcommand()
+def http_stub_exchange(options):
+    """usage: {program} hjx-stubber [options]
+    
+    -------------------------------
+    HTTP JSON Exchange Stub Service
+    -------------------------------
+    
+    Each line of JSON Lines input on STDIN is treated as a request and the
+    corresponding response is written to STDOUT, also as JSON Lines.  If the
+    request is successfully matched against the test cases, the matching test
+    case will be returned; in this case a 'response status' key in the response
+    (which defaults to 200 if not specified by the test case) is guaranteed.
+    If no matching test case is found, there will not be a 'response status' key
+    and the returned JSON will describe how the request can be modified to come
+    closer to one or more test cases.
+    
+    This subcommand is only intended to be used with HTTP retrieval of JSON or
+    HTTP exchanges of JSON, and no provision is made here for binary data in
+    the response body.
+    
+    To use additional keys in matching requests (other than `method`, `url`,
+    and `request body`), give the keys as a sequence under `request keys` in
+    the config file.  This interacts with the consultation of augmentation data:
+    if using augmentation data, make sure to also list `method`, `url`, and
+    `request body` under `request keys`.
+    
+    Options:
+        -c CONFFILE, --config CONFFILE      path to configuration file
+    """
+    config = Config(options.get('--config'))
+    
+    case_provider = framework.InterfaceCaseProvider(
+        config.interface_dir,
+        config.service_name,
+    )
+    from intercom_test import http_best_matches
+    database = http_best_matches.Database(
+        case_provider.cases(),
+        add_request_keys=config.request_keys,
+    )
+    
+    for line in sys.stdin:
+        database.json_exchange(line, sys.stdout)
 
 def csmain():
     main(sys.argv[0], _package_version)

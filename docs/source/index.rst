@@ -12,6 +12,7 @@ Welcome to intercom_test's documentation!
    
    modules
    icy-test
+   aws-serverless
 
 
 Using This Package

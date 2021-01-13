@@ -24,6 +24,7 @@ from ..utils import def_enum
 from ..yaml_tools import (
     content_events as _yaml_content_events,
     value_from_event_stream as _yaml_value_from_events,
+    get_load_fn as _get_yaml_loader,
 )
 
 class CaseIndexer:
@@ -158,7 +159,7 @@ def case_keys(data_file):
 
 def augment_dict_from(d, file_ref, case_key, *, safe_loading=True):
     file, start_byte = file_ref
-    load_yaml = yaml.safe_load if safe_loading else yaml.load
+    load_yaml = _get_yaml_loader(safe=safe_loading)
     with open(file) as stream:
         if start_byte is None:
             for k, v in load_yaml(stream)[case_key].items():
@@ -204,7 +205,7 @@ class TestCaseAugmenter:
                 ).augmentation_data_events()
     
     def _load_yaml(self, stream):
-        load_yaml = yaml.safe_load if self.safe_loading else yaml.load
+        load_yaml = _get_yaml_loader(safe=self.safe_loading)
         return load_yaml(stream)
 
 class Updater:
