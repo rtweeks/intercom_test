@@ -1,0 +1,4 @@
+# This file is for locally building documents with Sphinx
+
+-r Requirements.txt
+-e ..

@@ -1,3 +1,4 @@
+# This requirements.txt file is for readthedocs.org -- see local-reqs.txt for building locally
+
 sphinx>=1.8.1, <2
 sphinx-rtd-theme==0.4.2
--e ..
