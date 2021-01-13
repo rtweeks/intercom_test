@@ -1,5 +1,13 @@
 # Change History of intercom_test
 
+## v2.1.0
+
+* Updated the dependency on PyYAML to allow compatibility with newer versions that are not listed as vulnerable to CVE-2017-18342.
+* Added a `hjx-stubber` subcommand to `icy-test` that simplifies testing HTTP-exchanged JSON documents in non-Python environments.
+* Added support for testing Serverless HTTP API service provider projects targeting AWS.
+
+---
+
 ## v2.0.1
 
 * Fixed a typo relating to safe loading of YAML in augmentation data update files.
