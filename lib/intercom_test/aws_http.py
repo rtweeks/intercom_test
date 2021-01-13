@@ -25,7 +25,7 @@ class NoRoute(Exception):
     ATTRIBUTES = 'method path'
     
     def __str__(self, ):
-        return f"{self.method} {self.path}"
+        return "{} {}".format(self.method, self.path)
 
 @attributed_error
 class InvalidPathTemplate(Exception):
@@ -34,7 +34,10 @@ class InvalidPathTemplate(Exception):
     ATTRIBUTES = 'path_template error_index'
     
     def __str__(self, ):
-        return f"invalid template syntax at charater index {self.error_index} of {self.path_template!r}"
+        return "invalid template syntax at character index {i} of {tmplt}".format(
+            i=self.error_index,
+            tmplt=self.path_template
+        )
 
 @attributed_error
 class UnexpectedResponseBody(AssertionError):
@@ -46,17 +49,20 @@ class UnexpectedResponseBody(AssertionError):
         actual = self._format_body(self.actual)
         expected = self._format_body(self.expected)
         
-        return f"\n    ----- ACTUAL -----\n{actual}\n\n    ----- EXPECTED -----\n{expected}"
+        return "\n    ----- ACTUAL -----\n{actual}\n\n    ----- EXPECTED -----\n{expected}".format(
+            actual=actual,
+            expected=expected,
+        )
     
     @classmethod
     def _format_body(cls, body, indent=4):
         if isinstance(body, str):
-            body = json.dumps(expected)
+            body = json.dumps(body)
         elif isinstance(body, bytes):
             content = ' '.join("%02x" % b for b in body)
             if len(content) > 100:
                 content = content[:97] + '...'
-            body = f"<(binary) {content}>"
+            body = "<(binary) {content}>".format(content=content)
         else:
             body = json.dumps(body, indent=4)
         
@@ -65,7 +71,7 @@ class UnexpectedResponseBody(AssertionError):
 class HandlerMapper(ABC):
     """Abstract base class for classes that can map HTTP requests to handlers"""
     @abstractmethod
-    def map(self, method: str, path: str) -> AwsLambdaHandler:
+    def map(self, method: str, path: str) -> AwsLambdaHandler: # pragma: no cover
         """Given an HTTP method and request path, return a handler function"""
         raise Exception("pure abstract method called")
 
@@ -161,7 +167,7 @@ class ServerlessHandlerMapper(HandlerMapper):
         routing.sort(key=_routing_entry_sort_key)
         self._routing = routing
     
-    def _get_rendered_serverless_config(self, ) -> dict:
+    def _get_rendered_serverless_config(self, ) -> dict: # pragma: no cover
         # This method invokes the "serverless" program; it can be overridden for testing
         return json.loads(subp.check_output(
             ['serverless', 'print', '--format', 'json', '--config', self.config_file],
@@ -189,12 +195,12 @@ def _httpApi_routes(event_list: list):
             continue
         
         if http_event == '*':
-            http_event = 'ANY /{proxy+}'
-        elif isinstance(http_event, dict) and http_event['method'] == '*':
-            http_event = dict(http_event, method='ANY')
+            http_event = '* /{proxy+}'
         
         if isinstance(http_event, str):
-            yield http_event.split(maxsplit=1)
+            method, path_template = http_event.split(maxsplit=1)
+            method = method.lower()
+            yield (method, path_template)
         else:
             yield (http_event['method'], http_event['path'])
 
@@ -249,8 +255,8 @@ class OpenAPIPathMatcher:
                 self.path_segments.append(param)
             elif seg.group('lit'):
                 self.path_segments.append(seg.group('lit'))
-            else:
-                raise Exception(f"unknown path segment type for {seg.group()!r}")
+            else: # pragma: no cover
+                raise Exception("unknown path segment type for {!r}".format(seg.group()))
             match_start = seg.span()[1]
 
     def __call__(self, request_method: str, request_path: str) -> Optional[dict]:
@@ -285,7 +291,11 @@ class OpenAPIPathMatcher:
         return captured_params
 
     def __repr__(self, ):
-        return f"<{type(self).__name__} method={self.method!r} path={self.path!r}>"
+        return "<{} method={!r} path={!r}>".format(
+            type(self).__name__,
+            self.method,
+            self.path,
+        )
 
 
 def _routing_entry_sort_key(route_entry: Tuple[OpenAPIPathMatcher, AwsLambdaHandler]) -> Tuple[Tuple[int, str], ...]:
@@ -316,10 +326,13 @@ class LambdaHandlerProxy:
         return self.handler(*args, **kwargs)
     
     def __repr__(self, ):
-        parts = [type(self).__name__, f"for {self.handler.__module__}.{self.handler.__qualname__}"]
+        parts = [
+            type(self).__name__,
+            "for {}.{}".format(self.handler.__module__, self.handler.__qualname__)
+        ]
         if self.resource:
-            parts.append(f"(mapped from {self.resource!r})")
-        return f"<{' '.join(parts)}>"
+            parts.append("(mapped from {!r})".format(self.resource))
+        return "<{}>".format(' '.join(parts))
 
 def ala_rest_api(handler_mapper: HandlerMapper, context: Optional[dict] = None, case_env=None) -> Callable[[dict], None]:
     """Build a case tester from a :class:`HandlerMapper` for a REST API
@@ -492,7 +505,7 @@ class CasePreparer:
         for body in self._if_given('request body'):
             _build_aws_event_body(body, event)
     
-    def _incorporate_authorization(self, ):
+    def _incorporate_authorization(self, ): # pragma: no cover
         # Subclass can skip implementing this if desired
         pass
     
@@ -641,9 +654,9 @@ def _build_aws_event_body(request_body: OneOf[str, bytes, list, dict], aws_event
     request-body-related information set.
     """
     if isinstance(request_body, str):
-        aws_event['body'] = case_request_body
+        aws_event['body'] = request_body
     elif isinstance(request_body, bytes):
-        aws_event.update(body=b64encode(request_body), isBase64Encoded=True)
+        aws_event.update(body=b64encode(request_body).decode('ASCII'), isBase64Encoded=True)
     else:
         aws_event['body'] = json.dumps(request_body)
         content_type = 'application/json'
@@ -694,7 +707,10 @@ def confirm_expected_response(handler_result: dict, case: dict) -> None:
 
 def _confirm_response_code(actual: int, expected: int) -> None:
     assert actual == expected, (
-        f"expected HTTP response code {expected}, but got {actual}"
+        "expected HTTP response code {expected}, but got {actual}".format(
+            expected=expected,
+            actual=actual,
+        )
     )
 
 def _confirm_response_headers(actual_headers: Dict[str, str], actual_mv_headers: Dict[str, Iterable[str]], expected_headers: OneOf[Dict[str, str], Iterable[Tuple[str, str]]]):
@@ -704,13 +720,16 @@ def _confirm_response_headers(actual_headers: Dict[str, str], actual_mv_headers:
     errors = []
     mv_header_counts = Counter()
     for name, value in expected_headers:
-        if name in actual_headers and actual_headers['name'] == value:
+        if name in actual_headers and actual_headers[name] == value:
             pass
-        elif name in actual_mv_headers and value in actual_mv_headers['name']:
+        elif name in actual_mv_headers and value in actual_mv_headers[name]:
             mv_header_counts[name] += 1
         else:
             errors.append(
-                f"header {name!r} not found with value {value!r}"
+                "header {name!r} not found with value {value!r}".format(
+                    name=name,
+                    value=value,
+                )
             )
     
     for name, expected_count in mv_header_counts.items():
@@ -722,7 +741,11 @@ def _confirm_response_headers(actual_headers: Dict[str, str], actual_mv_headers:
         actual_count = len(actual_mv_headers[name])
         if actual_count != expected_count:
             errors.append(
-                f"multi-valued header {name!r} appeared with {actual_count} value(s), but expected {expected_count}"
+                "multi-valued header {name!r} appeared with {actual_count} value(s), but expected {expected_count}".format(
+                    name=name,
+                    actual_count=actual_count,
+                    expected_count=expected_count,
+                )
             )
     
     if len(errors) == 1:
