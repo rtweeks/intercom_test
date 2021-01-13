@@ -1,3 +1,4 @@
-sphinx>=1.8.1, <2
-sphinx-rtd-theme==0.4.2
+# This file is for locally building documents with Sphinx
+
+-r Requirements.txt
 -e ..
