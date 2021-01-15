@@ -1,5 +1,17 @@
 # Change History of intercom_test
 
+## v2.1.2
+
+* Finished updating the PyYAML dependency problem (first addressed in v2.1.0) -- changed a previously missed load call.
+
+---
+
+## v2.1.1
+
+* Fixed documentation build for readthedocs.org
+
+---
+
 ## v2.1.0
 
 * Updated the dependency on PyYAML to allow compatibility with newer versions that are not listed as vulnerable to CVE-2017-18342.
