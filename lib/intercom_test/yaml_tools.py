@@ -97,3 +97,11 @@ def get_load_fn(*, safe=True):
     if PYYAML_REQUIRES_LOADER:
         return yaml.unsafe_load
     return yaml.load
+
+def get_load_all_fn(*, safe=True):
+    if safe:
+        return yaml.safe_load_all
+    if PYYAML_REQUIRES_LOADER:
+        return yaml.unsafe_load_all
+    return yaml.load_all
+    
