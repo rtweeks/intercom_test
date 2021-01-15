@@ -38,7 +38,8 @@ from .utils import (
 )
 from .yaml_tools import (
     YAML_EXT,
-    content_events as _yaml_content_events
+    content_events as _yaml_content_events,
+    get_load_all_fn as _get_yaml_load_all,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,8 @@ class InterfaceCaseProvider:
     """
     
     use_body_type_magic = False
+    
+    safe_yaml_loading = True
     
     class _UpdateState(Enum):
         not_requested   = '-'
@@ -221,9 +224,10 @@ class InterfaceCaseProvider:
     
     def _cases_from_file(self, filepath):
         with open(filepath) as file:
+            load_all_yaml = _get_yaml_load_all(safe=self.safe_yaml_loading)
             for test_case in (
                 tc
-                for case_set in yaml.load_all(file)
+                for case_set in load_all_yaml(file)
                 for tc in case_set
             ):
                 if self.use_body_type_magic:
